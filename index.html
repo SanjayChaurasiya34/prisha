@@ -202,6 +202,14 @@ footer{text-align:center;padding:28px;color:var(--rose-deep);font-family:'Dancin
 .adm-btn.clear{background:rgba(217,79,112,.15);color:#e05575;border:1px solid rgba(217,79,112,.3);}
 .adm-btn.clear:hover{background:rgba(217,79,112,.25);}
 .adm-btn.back{background:linear-gradient(135deg,#d94f70,#a83458);color:#fff;}
+.adm-btn.export{background:rgba(93,173,226,.14);color:#7fc8ff;border:1px solid rgba(93,173,226,.3);}
+.adm-btn.export:hover{background:rgba(93,173,226,.24);}
+.sync-box{margin-bottom:18px;padding:14px 16px;border-radius:12px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.09);color:#bfc4d4;font-size:13px;line-height:1.55;}
+.sync-box strong{color:#f1f3fa;}
+.sync-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
+.sync-actions button{cursor:pointer;}
+#syncFileInput{display:none;}
+
 
 .adm-body{padding:28px 32px;max-width:1200px;margin:0 auto;}
 @media(max-width:700px){.adm-body{padding:18px 16px;}}
@@ -483,6 +491,11 @@ footer{text-align:center;padding:28px;color:var(--rose-deep);font-family:'Dancin
 
 <footer>made with 💗 by Sanjay, only for Prisha 🌧️</footer>
 <button id="musicBtn" onclick="toggleMusic()">🎵</button>
+<button id="syncExportBtn" onclick="exportActivity()" title="Export activity for Sanjay"
+  style="position:fixed;right:18px;bottom:18px;z-index:300;background:rgba(217,79,112,.92);color:#fff;border:0;border-radius:999px;padding:10px 14px;font:600 12px Inter,sans-serif;box-shadow:0 8px 25px rgba(0,0,0,.25);cursor:pointer;">
+  📤 Sync
+</button>
+
 
 </div><!-- end #mainSite -->
 
@@ -503,16 +516,25 @@ footer{text-align:center;padding:28px;color:var(--rose-deep);font-family:'Dancin
     </div>
     <div class="adm-actions">
       <button class="adm-btn refresh" onclick="renderAdmin()">🔄 Refresh</button>
+      <button class="adm-btn export" onclick="exportActivity()">⬇️ Export Activity</button>
+      <button class="adm-btn export" onclick="document.getElementById('syncFileInput').click()">⬆️ Import Activity</button>
       <button class="adm-btn clear" onclick="clearData()">🗑️ Clear All</button>
       <button class="adm-btn back" onclick="goBack()">← Back to Site</button>
+      <input id="syncFileInput" type="file" accept=".json,application/json" onchange="importActivity(event)">
     </div>
   </div>
 
   <div class="adm-body">
+    <div class="sync-box">
+      <strong>🟢 GitHub-only mode</strong><br>
+      Activity is stored in this browser only. GitHub Pages does not provide a shared database,
+      so cross-device updates cannot happen automatically without a backend.
+      <div class="sync-actions">
+        <button class="adm-btn export" onclick="exportActivity()">⬇️ Export activity as JSON</button>
+        <button class="adm-btn export" onclick="document.getElementById('syncFileInput').click()">⬆️ Import activity JSON</button>
+      </div>
+    </div>
 
-    <div id="firebaseStatus" style="margin-bottom:16px;padding:12px 16px;border-radius:10px;background:rgba(37,211,102,.08);border:1px solid rgba(37,211,102,.2);color:#8ee7aa;font-size:13px;">
-  🟢 Live shared database connected — updates from Prisha appear here automatically.
-</div>
 
     <!-- Date Banner -->
     <div class="date-banner unanswered" id="dateBanner">
@@ -579,139 +601,59 @@ footer{text-align:center;padding:28px;color:var(--rose-deep);font-family:'Dancin
 
 
 <script>
-
-<!-- Firebase SDK -->
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
-<script>
-/*
-  IMPORTANT:
-  Replace the firebaseConfig values below with your Firebase Web App config.
-  Then enable Realtime Database in Firebase Console.
-*/
-const firebaseConfig = {
-  apiKey: "PASTE_YOUR_FIREBASE_API_KEY",
-  authDomain: "PASTE_YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://PASTE_YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "PASTE_YOUR_PROJECT",
-  storageBucket: "PASTE_YOUR_PROJECT.appspot.com",
-  messagingSenderId: "PASTE_YOUR_SENDER_ID",
-  appId: "PASTE_YOUR_APP_ID"
-};
-
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-const STORE_PATH = "prisha_site";
-
-let D = defaultData();
-let firebaseReady = false;
+/* ============================================================
+   DATA LAYER — localStorage
+============================================================ */
+const STORE_KEY = 'sp_data_v3';
+let D = loadData();
 
 function defaultData(){
   return {
-    sessionStart: null, lastSeen: null, totalSessions: 0,
-    kisses: 0, hugs: 0, dateAnswer: null, dateAnswerTime: null,
-    noAttempts: 0, pageVisits: {}, notes: [], timeline: []
+    sessionStart: null,
+    lastSeen: null,
+    totalSessions: 0,
+    kisses: 0,
+    hugs: 0,
+    dateAnswer: null,      // 'yes' | null
+    dateAnswerTime: null,
+    noAttempts: 0,
+    pageVisits: {},
+    notes: [],             // {context, text, time}
+    timeline: []           // {time, label, dot}
   };
 }
 
-function mergeData(d){
-  return Object.assign(defaultData(), d || {});
+function loadData(){
+  try{
+    const d = localStorage.getItem(STORE_KEY);
+    return d ? JSON.parse(d) : defaultData();
+  }catch(e){ return defaultData(); }
 }
 
 function save(){
   D.lastSeen = new Date().toISOString();
-  if(firebaseReady){
-    return db.ref(STORE_PATH).set(D).catch(err => console.error("Firebase save:", err));
-  }
-  return Promise.resolve();
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(D)); }catch(e){}
 }
 
-async function loadData(){
-  try {
-    const snap = await db.ref(STORE_PATH).once("value");
-    D = mergeData(snap.val());
-  } catch(e) {
-    console.error("Firebase load:", e);
-    D = defaultData();
-  }
-  return D;
+/* ============================================================
+   TRACKING
+============================================================ */
+function track(label, dotClass='nav'){
+  D.timeline.push({ time: now(), label, dot: dotClass });
+  D.lastSeen = new Date().toISOString();
+  save();
 }
 
 function now(){
   return new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
+
 function nowFull(){
   return new Date().toLocaleString('en-IN',{
     day:'2-digit',month:'short',year:'numeric',
     hour:'2-digit',minute:'2-digit',second:'2-digit'
   });
 }
-
-
-async function incr(type){
-  D[type+'s'] = (D[type+'s'] || 0) + 1;
-  if(type==='kiss'){
-    track(`💋 Kiss tapped — total: ${D.kisses}`, 'kiss');
-    document.getElementById('kissBig').textContent = `${D.kisses} kisses sent 💋`;
-    document.getElementById('kissHomeLbl').textContent = `${D.kisses} kisses`;
-  } else {
-    track(`🤗 Hug tapped — total: ${D.hugs}`, 'hug');
-    document.getElementById('hugBig').textContent = `${D.hugs} hugs sent 🤗`;
-    document.getElementById('hugHomeLbl').textContent = `${D.hugs} hugs`;
-  }
-  await save();
-  heartBurst(type);
-}
-
-async function saveNote(context, textarea){
-  const text = textarea.value.trim();
-  if(!text){ alert('Please write something first! 💕'); return; }
-  D.notes = Array.isArray(D.notes) ? D.notes : [];
-  D.notes.push({context,text,time:nowFull()});
-  track(`✍️ Saved a note on "${context}"`, 'note');
-  await save();
-  textarea.value = '';
-  const savedMsg = document.getElementById(
-    context==='Kiss Page'?'kissNoteSaved':
-    context==='Hug Page'?'hugNoteSaved':'letterNoteSaved'
-  );
-  if(savedMsg){
-    savedMsg.style.display='block';
-    setTimeout(()=>savedMsg.style.display='none',3000);
-  }
-}
-
-async function dodgeNo(e){
-  D.noAttempts = (D.noAttempts || 0) + 1;
-  track(`🙅 Tried to click "No" (attempt #${D.noAttempts})`, 'date-no');
-  await save();
-  noBtn.classList.add('roaming');
-  noRoaming = true;
-  placeNoBtnAway(e);
-}
-
-async function sayYes(){
-  D.dateAnswer='yes';
-  D.dateAnswerTime=nowFull();
-  track('💕 SHE SAID YES TO THE DATE!! 🎉🎉🎉','date-yes');
-  await save();
-  document.getElementById('yesCelebrate').classList.add('show');
-  document.getElementById('yesBtn').style.display='none';
-  noBtn.style.display='none';
-  document.getElementById('dateBtns').style.minHeight='0';
-  launchConfetti();
-}
-
-/* Real-time admin updates */
-function startRealtimeAdmin(){
-  db.ref(STORE_PATH).on("value", snap => {
-    if(window.location.hash === '#sanjay-admin'){
-      D = mergeData(snap.val());
-      renderAdmin();
-    }
-  });
-}
-</script>
 
 /* ============================================================
    NAVIGATION
@@ -732,6 +674,20 @@ navBtns.forEach(b => b.addEventListener('click', () => go(b.dataset.page)));
 /* ============================================================
    COUNTERS
 ============================================================ */
+function incr(type){
+  D[type+'s']++;
+  if(type==='kiss'){
+    track(`💋 Kiss tapped — total: ${D.kisses}`, 'kiss');
+    document.getElementById('kissBig').textContent = `${D.kisses} kisses sent 💋`;
+    document.getElementById('kissHomeLbl').textContent = `${D.kisses} kisses`;
+  } else {
+    track(`🤗 Hug tapped — total: ${D.hugs}`, 'hug');
+    document.getElementById('hugBig').textContent = `${D.hugs} hugs sent 🤗`;
+    document.getElementById('hugHomeLbl').textContent = `${D.hugs} hugs`;
+  }
+  save();
+  heartBurst(type);
+}
 
 function heartBurst(type){
   const emojis = type==='kiss' ? ['💋','💗','😘','💕'] : ['🤗','💞','🫂','💓'];
@@ -749,6 +705,18 @@ function heartBurst(type){
 /* ============================================================
    NOTES
 ============================================================ */
+function saveNote(context, textarea){
+  const text = textarea.value.trim();
+  if(!text){ alert('Please write something first! 💕'); return; }
+  D.notes.push({ context, text, time: nowFull() });
+  track(`✍️ Saved a note on "${context}"`, 'note');
+  save();
+  textarea.value = '';
+  const savedMsg = document.getElementById(
+    context==='Kiss Page'?'kissNoteSaved':context==='Hug Page'?'hugNoteSaved':'letterNoteSaved'
+  );
+  if(savedMsg){ savedMsg.style.display='block'; setTimeout(()=>savedMsg.style.display='none',3000); }
+}
 
 /* ============================================================
    DATE — No Button Dodges
@@ -756,6 +724,14 @@ function heartBurst(type){
 const noBtn = document.getElementById('noBtn');
 let noRoaming = false;
 
+function dodgeNo(e){
+  D.noAttempts++;
+  track(`🙅 Tried to click "No" (attempt #${D.noAttempts})`, 'date-no');
+  save();
+  noBtn.classList.add('roaming');
+  noRoaming = true;
+  placeNoBtnAway(e);
+}
 
 function dodgeNoTouch(e){
   e.preventDefault(); // stop click from firing
@@ -776,7 +752,17 @@ function placeNoBtnAway(e){
   noBtn.style.top = y+'px';
 }
 
-
+function sayYes(){
+  D.dateAnswer = 'yes';
+  D.dateAnswerTime = nowFull();
+  track('💕 SHE SAID YES TO THE DATE!! 🎉🎉🎉', 'date-yes');
+  save();
+  document.getElementById('yesCelebrate').classList.add('show');
+  document.getElementById('yesBtn').style.display = 'none';
+  noBtn.style.display = 'none';
+  document.getElementById('dateBtns').style.minHeight = '0';
+  launchConfetti();
+}
 
 /* ============================================================
    CONFETTI
@@ -898,7 +884,7 @@ window.addEventListener('hashchange', checkRoute);
    ADMIN RENDER
 ============================================================ */
 function renderAdmin(){
-  D = mergeData(D);
+  D = loadData(); // always fresh from storage
 
   // ── Stats ──
   document.getElementById('st-kisses').textContent = D.kisses;
@@ -994,49 +980,96 @@ function renderAdmin(){
   `;
 }
 
-async function clearData(){
+function clearData(){
   if(!confirm('Clear ALL of Prisha\'s activity data? This cannot be undone.')) return;
   D = defaultData();
-  await save();
+  save();
   renderAdmin();
+}
+
+function exportActivity(){
+  const payload = {
+    format: 'prisha-activity',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    data: D
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+  a.href = url;
+  a.download = `prisha-activity-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function importActivity(event){
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const payload = JSON.parse(reader.result);
+      const imported = payload && payload.format === 'prisha-activity' ? payload.data : payload;
+
+      if(!imported || typeof imported !== 'object' ||
+         typeof imported.kisses !== 'number' ||
+         typeof imported.hugs !== 'number' ||
+         !Array.isArray(imported.timeline)){
+        throw new Error('Invalid activity file');
+      }
+
+      if(!confirm('Import this activity data and replace the current dashboard data?')) return;
+
+      D = Object.assign(defaultData(), imported);
+      save();
+      renderAdmin();
+      alert('Activity imported successfully. 💗');
+    }catch(err){
+      console.error(err);
+      alert('Could not import this file. Please select a valid Prisha activity JSON file.');
+    }
+  };
+  reader.readAsText(file);
 }
 
 /* ============================================================
    INIT
 ============================================================ */
-window.addEventListener('load', async () => {
-  try {
-    await db.ref(STORE_PATH).once('value');
-    firebaseReady = true;
-    await loadData();
+window.addEventListener('load', () => {
+  D = loadData();
 
-    if(!D.sessionStart){
-      D.sessionStart = new Date().toISOString();
-      D.totalSessions = (D.totalSessions || 0) + 1;
-    }
-
-    track('🟢 Prisha opened the website', 'sys');
-
-    if(D.kisses > 0){
-      document.getElementById('kissBig').textContent = `${D.kisses} kisses sent 💋`;
-      document.getElementById('kissHomeLbl').textContent = `${D.kisses} kisses`;
-    }
-    if(D.hugs > 0){
-      document.getElementById('hugBig').textContent = `${D.hugs} hugs sent 🤗`;
-      document.getElementById('hugHomeLbl').textContent = `${D.hugs} hugs`;
-    }
-    if(D.dateAnswer === 'yes'){
-      document.getElementById('yesCelebrate').classList.add('show');
-      document.getElementById('yesBtn').style.display='none';
-      document.getElementById('noBtn').style.display='none';
-    }
-
-    startRealtimeAdmin();
-    checkRoute();
-  } catch(err) {
-    console.error("Firebase initialization failed:", err);
-    alert("Firebase is not configured yet. Please add your Firebase config in index.html.");
+  // Session start
+  if(!D.sessionStart){
+    D.sessionStart = new Date().toISOString();
+    D.totalSessions = (D.totalSessions||0) + 1;
   }
+
+  track('🟢 Prisha opened the website', 'sys');
+
+  // Sync counters to UI
+  if(D.kisses > 0){
+    document.getElementById('kissBig').textContent = `${D.kisses} kisses sent 💋`;
+    document.getElementById('kissHomeLbl').textContent = `${D.kisses} kisses`;
+  }
+  if(D.hugs > 0){
+    document.getElementById('hugBig').textContent = `${D.hugs} hugs sent 🤗`;
+    document.getElementById('hugHomeLbl').textContent = `${D.hugs} hugs`;
+  }
+
+  // Date already answered?
+  if(D.dateAnswer === 'yes'){
+    document.getElementById('yesCelebrate').classList.add('show');
+    document.getElementById('yesBtn').style.display = 'none';
+    document.getElementById('noBtn').style.display = 'none';
+  }
+
+  checkRoute();
 });
 
 // Track when tab is hidden
